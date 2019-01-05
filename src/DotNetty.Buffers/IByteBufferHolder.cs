@@ -8,26 +8,28 @@ namespace DotNetty.Buffers
     public interface IByteBufferHolder : IReferenceCounted
     {
         /// <summary>
-        /// Return the data which is held by this {@link ByteBufHolder}.
+        ///     Return the data which is held by this {@link ByteBufHolder}.
         /// </summary>
         IByteBuffer Content { get; }
 
         /// <summary>
-        /// Create a deep copy of this {@link ByteBufHolder}.
+        ///     Create a deep copy of this {@link ByteBufHolder}.
         /// </summary>
         IByteBufferHolder Copy();
 
         /// <summary>
-        /// Duplicate the {@link ByteBufHolder}. Be aware that this will not automatically call {@link #retain()}.
+        ///     Duplicate the {@link ByteBufHolder}. Be aware that this will not automatically call {@link #retain()}.
         /// </summary>
         IByteBufferHolder Duplicate();
 
-        //IByteBufferHolder Retain();
+        /// <summary>
+        ///     Duplicates this {@link ByteBufHolder}. This method returns a retained duplicate unlike {@link #duplicate()}.
+        /// </summary>
+        IByteBufferHolder RetainedDuplicate();
 
-        //IByteBufferHolder Retain(int increment);
-
-        //IByteBufferHolder touch();
-
-        //IByteBufferHolder touch(object hint);
+        /// <summary>
+        ///    Returns a new {@link ByteBufHolder} which contains the specified {@code content}.
+        /// </summary>
+        IByteBufferHolder Replace(IByteBuffer content);
     }
 }

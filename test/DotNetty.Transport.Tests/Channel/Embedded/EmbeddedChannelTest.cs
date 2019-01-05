@@ -7,6 +7,7 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
     using System.Threading;
     using System.Threading.Tasks;
     using DotNetty.Common;
+    using DotNetty.Common.Concurrency;
     using DotNetty.Common.Utilities;
     using DotNetty.Transport.Channels;
     using DotNetty.Transport.Channels.Embedded;
@@ -38,7 +39,7 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
             int first = 1;
             int second = 2;
             IChannelHandler handler = new ChannelHandler1(first, second);
-            EmbeddedChannel channel = new EmbeddedChannel(new ActionChannelInitializer<IChannel>(ch => { ch.Pipeline.AddLast(handler); }));
+            var channel = new EmbeddedChannel(new ActionChannelInitializer<IChannel>(ch => { ch.Pipeline.AddLast(handler); }));
             IChannelPipeline pipeline = channel.Pipeline;
             Assert.Same(handler, pipeline.FirstContext().Handler);
             Assert.True(channel.WriteInbound(3));
@@ -73,6 +74,38 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
             Assert.True(future.IsCanceled);
         }
 
+        [Fact]
+        public async Task TestScheduledCancelledDirectly()
+        {
+            var ch = new EmbeddedChannel(new ChannelHandlerAdapter());
+
+            IScheduledTask task1 = ch.EventLoop.Schedule(() => { }, new TimeSpan(1));
+            IScheduledTask task2 = ch.EventLoop.Schedule(() => { }, new TimeSpan(1));
+            IScheduledTask task3 = ch.EventLoop.Schedule(() => { }, new TimeSpan(1));
+            task2.Cancel();
+            ch.RunPendingTasks();
+            Task<bool> checkTask1 = ch.EventLoop.SubmitAsync(() => task1.Completion.IsCompleted);
+            Task<bool> checkTask2 = ch.EventLoop.SubmitAsync(() => task2.Completion.IsCanceled);
+            Task<bool> checkTask3 = ch.EventLoop.SubmitAsync(() => task3.Completion.IsCompleted);
+            ch.RunPendingTasks();
+            ch.CheckException();
+            Assert.True(await checkTask1);
+            Assert.True(await checkTask2);
+            Assert.True(await checkTask3);
+        }
+
+        [Fact]
+        public async Task TestScheduledCancelledAsync()
+        {
+            var ch = new EmbeddedChannel(new ChannelHandlerAdapter());
+            var cts = new CancellationTokenSource();
+            Task task = ch.EventLoop.ScheduleAsync(() => { }, TimeSpan.FromDays(1), cts.Token);
+            await Task.Run(() => cts.Cancel());
+            Task<bool> checkTask = ch.EventLoop.SubmitAsync(() => task.IsCanceled);
+            ch.RunPendingTasks();
+            Assert.True(await checkTask);
+        }
+
         class ChannelHandler3 : ChannelHandlerAdapter
         {
             readonly CountdownEvent latch;
@@ -105,10 +138,10 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
         [InlineData(3000)]
         public void TestHandlerAddedExecutedInEventLoop(int timeout)
         {
-            CountdownEvent latch = new CountdownEvent(1);
-            AtomicReference<Exception> ex = new AtomicReference<Exception>();
+            var latch = new CountdownEvent(1);
+            var ex = new AtomicReference<Exception>();
             IChannelHandler handler = new ChannelHandler3(latch, ex);
-            EmbeddedChannel channel = new EmbeddedChannel(handler);
+            var channel = new EmbeddedChannel(handler);
             Assert.False(channel.Finish());
             Assert.True(latch.Wait(timeout));
             Exception cause = ex.Value;
@@ -121,7 +154,7 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
         [Fact]
         public void TestConstructWithoutHandler()
         {
-            EmbeddedChannel channel = new EmbeddedChannel();
+            var channel = new EmbeddedChannel();
             Assert.True(channel.WriteInbound(1));
             Assert.True(channel.WriteOutbound(2));
             Assert.True(channel.Finish());
@@ -133,22 +166,20 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
 
         [Theory]
         [InlineData(1000)]
-        public void TestFireChannelInactiveAndUnregisteredOnDisconnect(int timeout)
-        {
+        public void TestFireChannelInactiveAndUnregisteredOnDisconnect(int timeout) =>
             this.TestFireChannelInactiveAndUnregisteredOnClose(channel => channel.DisconnectAsync(), timeout);
-        }
 
-        public void TestFireChannelInactiveAndUnregisteredOnClose(Func<IChannel, Task> action, int timeout)
+        void TestFireChannelInactiveAndUnregisteredOnClose(Func<IChannel, Task> action, int timeout)
         {
-            CountdownEvent latch = new CountdownEvent(3);
-            EmbeddedChannel channel = new EmbeddedChannel(new ChannelHandlerWithInactiveAndRegister(latch));
+            var latch = new CountdownEvent(3);
+            var channel = new EmbeddedChannel(new ChannelHandlerWithInactiveAndRegister(latch));
             action(channel);
             Assert.True(latch.Wait(timeout));
         }
 
         class ChannelHandlerWithInactiveAndRegister : ChannelHandlerAdapter
         {
-            CountdownEvent latch;
+            readonly CountdownEvent latch;
 
             public ChannelHandlerWithInactiveAndRegister(CountdownEvent latch)
             {
@@ -165,10 +196,7 @@ namespace DotNetty.Transport.Tests.Channel.Embedded
                 });
             }
 
-            public override void ChannelUnregistered(IChannelHandlerContext context)
-            {
-                this.latch.Signal();
-            }
+            public override void ChannelUnregistered(IChannelHandlerContext context) => this.latch.Signal();
         }
     }
 }

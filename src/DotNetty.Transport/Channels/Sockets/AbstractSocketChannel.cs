@@ -4,12 +4,11 @@
 namespace DotNetty.Transport.Channels.Sockets
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics.Contracts;
     using System.Net;
     using System.Net.Sockets;
-    using System.Threading;
     using System.Threading.Tasks;
-    using DotNetty.Buffers;
     using DotNetty.Common.Concurrency;
     using DotNetty.Common.Internal.Logging;
     using DotNetty.Common.Utilities;
@@ -37,11 +36,11 @@ namespace DotNetty.Transport.Channels.Sockets
         SocketChannelAsyncOperation readOperation;
         SocketChannelAsyncOperation writeOperation;
         volatile bool inputShutdown;
-        volatile bool readPending;
+        internal bool ReadPending;
         volatile StateFlags state;
 
         TaskCompletionSource connectPromise;
-        CancellationTokenSource connectCancellation;
+        IScheduledTask connectCancellationTask;
 
         protected AbstractSocketChannel(IChannel parent, Socket socket)
             : base(parent)
@@ -57,7 +56,7 @@ namespace DotNetty.Transport.Channels.Sockets
             {
                 try
                 {
-                    socket.Close();
+                    socket.Dispose();
                 }
                 catch (SocketException ex2)
                 {
@@ -71,38 +70,56 @@ namespace DotNetty.Transport.Channels.Sockets
             }
         }
 
-        public override bool Open
+        public override bool Open => this.IsInState(StateFlags.Open);
+
+        public override bool Active => this.IsInState(StateFlags.Active);
+
+        /// <summary>
+        ///     Set read pending to <c>false</c>.
+        /// </summary>
+        protected internal void ClearReadPending()
         {
-            get { return this.IsInState(StateFlags.Open); }
+            if (this.Registered)
+            {
+                IEventLoop eventLoop = this.EventLoop;
+                if (eventLoop.InEventLoop)
+                {
+                    this.ClearReadPending0();
+                }
+                else
+                {
+                    eventLoop.Execute(channel => ((AbstractSocketChannel)channel).ClearReadPending0(), this);
+                }
+            }
+            else
+            {
+                // Best effort if we are not registered yet clear ReadPending. This happens during channel initialization.
+                // NB: We only set the boolean field instead of calling ClearReadPending0(), because the SelectionKey is
+                // not set yet so it would produce an assertion failure.
+                this.ReadPending = false;
+            }
         }
 
-        public override bool Active
+        void ClearReadPending0() => this.ReadPending = false;
+
+        protected bool InputShutdown => this.inputShutdown;
+
+        protected void ShutdownInput() => this.inputShutdown = true;
+
+        protected void SetState(StateFlags stateToSet) => this.state |= stateToSet;
+
+        /// <returns>state before modification</returns>
+        protected StateFlags ResetState(StateFlags stateToReset)
         {
-            get { return this.IsInState(StateFlags.Active); }
+            StateFlags oldState = this.state;
+            if ((oldState & stateToReset) != 0)
+            {
+                this.state = oldState & ~stateToReset;
+            }
+            return oldState;
         }
 
-        protected bool ReadPending
-        {
-            get { return this.readPending; }
-            set { this.readPending = value; }
-        }
-
-        protected bool InputShutdown
-        {
-            get { return this.inputShutdown; }
-        }
-
-        protected void ShutdownInput()
-        {
-            this.inputShutdown = true;
-        }
-
-        protected void SetState(StateFlags stateToSet)
-        {
-            this.state |= stateToSet;
-        }
-
-        protected bool ResetState(StateFlags stateToReset)
+        protected bool TryResetState(StateFlags stateToReset)
         {
             StateFlags oldState = this.state;
             if ((oldState & stateToReset) != 0)
@@ -113,32 +130,40 @@ namespace DotNetty.Transport.Channels.Sockets
             return false;
         }
 
-        protected bool IsInState(StateFlags stateToCheck)
+        protected bool IsInState(StateFlags stateToCheck) => (this.state & stateToCheck) == stateToCheck;
+
+        protected SocketChannelAsyncOperation ReadOperation => this.readOperation ?? (this.readOperation = new SocketChannelAsyncOperation(this, true));
+
+        SocketChannelAsyncOperation WriteOperation => this.writeOperation ?? (this.writeOperation = new SocketChannelAsyncOperation(this, false));
+
+        protected SocketChannelAsyncOperation PrepareWriteOperation(ArraySegment<byte> buffer)
         {
-            return (this.state & stateToCheck) == stateToCheck;
+            SocketChannelAsyncOperation operation = this.WriteOperation;
+            operation.SetBuffer(buffer.Array, buffer.Offset, buffer.Count);
+            return operation;
         }
 
-        protected SocketChannelAsyncOperation ReadOperation
+        protected SocketChannelAsyncOperation PrepareWriteOperation(IList<ArraySegment<byte>> buffers)
         {
-            get { return this.readOperation ?? (this.readOperation = new SocketChannelAsyncOperation(this, true)); }
-        }
-
-        protected SocketChannelAsyncOperation PrepareWriteOperation(IByteBuffer buffer)
-        {
-            SocketChannelAsyncOperation operation = this.writeOperation ?? (this.writeOperation = new SocketChannelAsyncOperation(this, false));
-            if (!buffer.HasArray)
-            {
-                throw new NotImplementedException("IByteBuffer implementations not backed by array are currently not supported.");
-            }
-            operation.SetBuffer(buffer.Array, buffer.ArrayOffset + buffer.WriterIndex, buffer.WritableBytes);
+            SocketChannelAsyncOperation operation = this.WriteOperation;
+            operation.BufferList = buffers;
             return operation;
         }
 
         protected void ResetWriteOperation()
         {
             SocketChannelAsyncOperation operation = this.writeOperation;
-            Contract.Requires(operation != null);
-            operation.SetBuffer(null, 0, 0);
+
+            Contract.Assert(operation != null);
+
+            if (operation.BufferList == null)
+            {
+                operation.SetBuffer(null, 0, 0);
+            }
+            else
+            {
+                operation.BufferList = null;
+            }
         }
 
         /// <remarks>PORT NOTE: matches behavior of NioEventLoop.processSelectedKey</remarks>
@@ -171,6 +196,7 @@ namespace DotNetty.Transport.Channels.Sockets
                     }
                     break;
                 case SocketAsyncOperation.Receive:
+                case SocketAsyncOperation.ReceiveFrom:
                     if (eventLoop.InEventLoop)
                     {
                         @unsafe.FinishRead(operation);
@@ -181,6 +207,7 @@ namespace DotNetty.Transport.Channels.Sockets
                     }
                     break;
                 case SocketAsyncOperation.Send:
+                case SocketAsyncOperation.SendTo:
                     if (eventLoop.InEventLoop)
                     {
                         @unsafe.FinishWrite(operation);
@@ -199,12 +226,12 @@ namespace DotNetty.Transport.Channels.Sockets
         internal interface ISocketChannelUnsafe : IChannelUnsafe
         {
             /// <summary>
-            /// Finish connect
+            ///     Finish connect
             /// </summary>
             void FinishConnect(SocketChannelAsyncOperation operation);
 
             /// <summary>
-            /// Read from underlying {@link SelectableChannel}
+            ///     Read from underlying {@link SelectableChannel}
             /// </summary>
             void FinishRead(SocketChannelAsyncOperation operation);
 
@@ -218,12 +245,9 @@ namespace DotNetty.Transport.Channels.Sockets
             {
             }
 
-            public AbstractSocketChannel Channel
-            {
-                get { return (AbstractSocketChannel)this.channel; }
-            }
+            public AbstractSocketChannel Channel => (AbstractSocketChannel)this.channel;
 
-            public override sealed Task ConnectAsync(EndPoint remoteAddress, EndPoint localAddress)
+            public sealed override Task ConnectAsync(EndPoint remoteAddress, EndPoint localAddress)
             {
                 // todo: handle cancellation
                 AbstractSocketChannel ch = this.Channel;
@@ -253,36 +277,33 @@ namespace DotNetty.Transport.Channels.Sockets
                         TimeSpan connectTimeout = ch.Configuration.ConnectTimeout;
                         if (connectTimeout > TimeSpan.Zero)
                         {
-                            CancellationTokenSource cts = ch.connectCancellation = new CancellationTokenSource();
-
-                            ch.EventLoop.ScheduleAsync(
-                                c =>
+                            ch.connectCancellationTask = ch.EventLoop.Schedule(
+                                (c, a) =>
                                 {
                                     // todo: make static / cache delegate?..
                                     var self = (AbstractSocketChannel)c;
                                     // todo: call Socket.CancelConnectAsync(...)
-                                    TaskCompletionSource promise = ch.connectPromise;
-                                    var cause =
-                                        new ConnectTimeoutException("connection timed out: " + remoteAddress);
+                                    TaskCompletionSource promise = self.connectPromise;
+                                    var cause = new ConnectTimeoutException("connection timed out: " + a.ToString());
                                     if (promise != null && promise.TrySetException(cause))
                                     {
-                                        self.CloseAsync();
+                                        self.CloseSafe();
                                     }
                                 },
                                 this.channel,
-                                connectTimeout,
-                                cts.Token);
+                                remoteAddress,
+                                connectTimeout);
                         }
 
-                        ch.connectPromise.Task.ContinueWith(t =>
-                        {
-                            if (ch.connectCancellation != null)
+                        ch.connectPromise.Task.ContinueWith(
+                            (t, s) =>
                             {
-                                ch.connectCancellation.Cancel();
-                            }
-                            ch.connectPromise = null;
-                            this.channel.CloseAsync();
-                        },
+                                var c = (AbstractSocketChannel)s;
+                                c.connectCancellationTask?.Cancel();
+                                c.connectPromise = null;
+                                c.CloseSafe();
+                            },
+                            ch,
                             TaskContinuationOptions.OnlyOnCanceled | TaskContinuationOptions.ExecuteSynchronously);
 
                         return ch.connectPromise.Task;
@@ -297,16 +318,6 @@ namespace DotNetty.Transport.Channels.Sockets
 
             void FulfillConnectPromise(bool wasActive)
             {
-                TaskCompletionSource promise = this.Channel.connectPromise;
-                if (promise == null)
-                {
-                    // Closed via cancellation and the promise has been notified already.
-                    return;
-                }
-
-                // trySuccess() will return false if a user cancelled the connection attempt.
-                bool promiseSet = promise.TryComplete();
-
                 // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
                 // because what happened is what happened.
                 if (!wasActive && this.channel.Active)
@@ -314,10 +325,19 @@ namespace DotNetty.Transport.Channels.Sockets
                     this.channel.Pipeline.FireChannelActive();
                 }
 
-                // If a user cancelled the connection attempt, close the channel, which is followed by channelInactive().
-                if (!promiseSet)
+                TaskCompletionSource promise = this.Channel.connectPromise;
+                // If promise is null, then it the channel was Closed via cancellation and the promise has been notified already.
+                if (promise != null)
                 {
-                    this.CloseAsync();
+                    // trySuccess() will return false if a user cancelled the connection attempt.
+                    bool promiseSet = promise.TryComplete();
+
+                    // If a user cancelled the connection attempt, close the channel, which is followed by channelInactive().
+                    if (!promiseSet)
+                    {
+                        this.CloseSafe();
+                    }
+
                 }
             }
 
@@ -349,24 +369,21 @@ namespace DotNetty.Transport.Channels.Sockets
                 catch (Exception ex)
                 {
                     TaskCompletionSource promise = ch.connectPromise;
-                    EndPoint remoteAddress = promise == null ? null : (EndPoint)promise.Task.AsyncState;
+                    var remoteAddress = (EndPoint)promise?.Task.AsyncState;
                     this.FulfillConnectPromise(this.AnnotateConnectException(ex, remoteAddress));
                 }
                 finally
                 {
                     // Check for null as the connectTimeoutFuture is only created if a connectTimeoutMillis > 0 is used
                     // See https://github.com/netty/netty/issues/1770
-                    if (ch.connectCancellation != null)
-                    {
-                        ch.connectCancellation.Cancel();
-                    }
+                    ch.connectCancellationTask?.Cancel();
                     ch.connectPromise = null;
                 }
             }
 
             public abstract void FinishRead(SocketChannelAsyncOperation operation);
 
-            protected override sealed void Flush0()
+            protected sealed override void Flush0()
             {
                 // Flush immediately only when there's no pending flush.
                 // If there's a pending flush operation, event loop will call FinishWrite() later,
@@ -380,6 +397,10 @@ namespace DotNetty.Transport.Channels.Sockets
 
             public void FinishWrite(SocketChannelAsyncOperation operation)
             {
+                bool resetWritePending = this.Channel.TryResetState(StateFlags.WriteScheduled);
+
+                Contract.Assert(resetWritePending);
+
                 ChannelOutboundBuffer input = this.OutboundBuffer;
                 try
                 {
@@ -388,35 +409,23 @@ namespace DotNetty.Transport.Channels.Sockets
                     this.Channel.ResetWriteOperation();
                     if (sent > 0)
                     {
-                        object msg = input.Current;
-                        var buffer = msg as IByteBuffer;
-                        if (buffer != null)
-                        {
-                            buffer.SetWriterIndex(buffer.WriterIndex + sent);
-                        }
-                        // todo: FileRegion support
+                        input.RemoveBytes(sent);
                     }
                 }
                 catch (Exception ex)
                 {
-                    input.FailFlushed(ex, true);
-                    throw;
+                    Util.CompleteChannelCloseTaskSafely(this.channel, this.CloseAsync(new ClosedChannelException("Failed to write", ex), false));
                 }
 
-                // directly call super.flush0() to force a flush now
-                base.Flush0();
+                // Double check if there's no pending flush
+                // See https://github.com/Azure/DotNetty/issues/218
+                this.Flush0(); // todo: does it make sense now that we've actually written out everything that was flushed previously? concurrent flush handling?
             }
 
-            bool IsFlushPending()
-            {
-                return this.Channel.IsInState(StateFlags.WriteScheduled);
-            }
+            bool IsFlushPending() => this.Channel.IsInState(StateFlags.WriteScheduled);
         }
 
-        protected override bool IsCompatible(IEventLoop eventLoop)
-        {
-            return true;
-        }
+        protected override bool IsCompatible(IEventLoop eventLoop) => true;
 
         protected override void DoBeginRead()
         {
@@ -430,7 +439,7 @@ namespace DotNetty.Transport.Channels.Sockets
                 return;
             }
 
-            this.readPending = true;
+            this.ReadPending = true;
 
             if (!this.IsInState(StateFlags.ReadScheduled))
             {
@@ -442,12 +451,12 @@ namespace DotNetty.Transport.Channels.Sockets
         protected abstract void ScheduleSocketRead();
 
         /// <summary>
-        ///  Connect to the remote peer
+        ///     Connect to the remote peer
         /// </summary>
         protected abstract bool DoConnect(EndPoint remoteAddress, EndPoint localAddress);
 
         /// <summary>
-        /// Finish the connect
+        ///     Finish the connect
         /// </summary>
         protected abstract void DoFinishConnect(SocketChannelAsyncOperation operation);
 
@@ -457,27 +466,29 @@ namespace DotNetty.Transport.Channels.Sockets
             if (promise != null)
             {
                 // Use TrySetException() instead of SetException() to avoid the race against cancellation due to timeout.
-                promise.TrySetException(ClosedChannelException);
+                promise.TrySetException(new ClosedChannelException());
                 this.connectPromise = null;
             }
 
-            CancellationTokenSource cancellation = this.connectCancellation;
-            if (cancellation != null)
+            IScheduledTask cancellationTask = this.connectCancellationTask;
+            if (cancellationTask != null)
             {
-                cancellation.Cancel();
-                this.connectCancellation = null;
+                cancellationTask.Cancel();
+                this.connectCancellationTask = null;
             }
 
             SocketChannelAsyncOperation readOp = this.readOperation;
             if (readOp != null)
             {
                 readOp.Dispose();
+                this.readOperation = null;
             }
 
             SocketChannelAsyncOperation writeOp = this.writeOperation;
             if (writeOp != null)
             {
                 writeOp.Dispose();
+                this.writeOperation = null;
             }
         }
     }

@@ -36,26 +36,22 @@ namespace DotNetty.Transport.Channels
         }
 
         /// <summary>
-        /// Return the default implementation which returns {@code -1} for unknown messages.
+        /// Returns the default implementation, which returns <c>0</c> for unknown messages.
         /// </summary>
         public static readonly IMessageSizeEstimator Default = new DefaultMessageSizeEstimator(0);
 
         readonly IMessageSizeEstimatorHandle handle;
 
         /// <summary>
-        /// Create a new instance
-        ///
-        /// @param unknownSize       The size which is returned for unknown messages.
+        /// Creates a new instance.
         /// </summary>
+        /// <param name="unknownSize">The size which is returned for unknown messages.</param>
         public DefaultMessageSizeEstimator(int unknownSize)
         {
             Contract.Requires(unknownSize >= 0);
             this.handle = new HandleImpl(unknownSize);
         }
 
-        public IMessageSizeEstimatorHandle NewHandle()
-        {
-            return this.handle;
-        }
+        public IMessageSizeEstimatorHandle NewHandle() => this.handle;
     }
 }

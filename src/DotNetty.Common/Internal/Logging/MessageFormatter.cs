@@ -8,115 +8,92 @@ namespace DotNetty.Common.Internal.Logging
     using System.Text;
 
     /// <summary>
-    ///     Formats messages according to very simple substitution rules. Substitutions
-    ///     can be made 1, 2 or more arguments.
-    ///     <p />
-    ///     <p />
-    ///     For example,
-    ///     <p />
-    ///     <pre>
-    ///         MessageFormatter.Format(&quot;Hi {}.&quot;, &quot;there&quot;)
-    ///     </pre>
-    ///     <p />
-    ///     will return the string "Hi there.".
-    ///     <p />
-    ///     The {} pair is called the <em>formatting anchor</em>. It serves to designate
-    ///     the location where arguments need to be substituted within the message
-    ///     pattern.
-    ///     <p />
-    ///     In case your message contains the '{' or the '}' character, you do not have
-    ///     to do anything special unless the '}' character immediately follows '{'. For
-    ///     example,
-    ///     <p />
-    ///     <pre>
-    ///         MessageFormatter.Format(&quot;Set {1,2,3} is not equal to {}.&quot;, &quot;1,2&quot;);
-    ///     </pre>
-    ///     <p />
-    ///     will return the string "Set {1,2,3} is not equal to 1,2.".
-    ///     <p />
-    ///     <p />
-    ///     If for whatever reason you need to place the string "{}" in the message
-    ///     without its <em>formatting anchor</em> meaning, then you need to escape the
-    ///     '{' character with '\', that is the backslash character. Only the '{'
-    ///     character should be escaped. There is no need to escape the '}' character.
-    ///     For example,
-    ///     <p />
-    ///     <pre>
-    ///         MessageFormatter.Format(&quot;Set \\{} is not equal to {}.&quot;, &quot;1,2&quot;);
-    ///     </pre>
-    ///     <p />
-    ///     will return the string "Set {} is not equal to 1,2.".
-    ///     <p />
-    ///     <p />
-    ///     The escaping behavior just described can be overridden by escaping the escape
-    ///     character '\'. Calling
-    ///     <p />
-    ///     <pre>
-    ///         MessageFormatter.Format(&quot;File name is C:\\\\{}.&quot;, &quot;file.zip&quot;);
-    ///     </pre>
-    ///     <p />
-    ///     will return the string "File name is C:\file.zip".
-    ///     <p />
-    ///     <p />
-    ///     The formatting conventions are different than those of {@link MessageFormat}
-    ///     which ships with the Java platform. This is justified by the fact that
-    ///     SLF4J's implementation is 10 times faster than that of {@link MessageFormat}.
-    ///     This local performance difference is both measurable and significant in the
-    ///     larger context of the complete logging processing chain.
-    ///     <p />
-    ///     <p />
-    ///     <seealso cref="Format(string, object)" />
-    ///     <seealso cref="Format(string, object, object)" />
-    ///     <seealso cref="ArrayFormat(string, object[])" />
+    /// Formats messages according to very simple substitution rules. Substitutions can be made 1, 2 or more arguments.
+    /// <para>For example,</para>
+    /// <code>
+    /// MessageFormatter.Format(&quot;Hi {}.&quot;, &quot;there&quot;)
+    /// </code>
+    /// <para>
+    /// will return the string "Hi there.".
+    /// </para>
+    /// <para>
+    /// The {} pair is called the <em>formatting anchor</em>. It serves to designate the location where arguments need
+    /// to be substituted within the message pattern.
+    /// </para>
+    /// <para>
+    /// In case your message contains the '{' or the '}' character, you do not have to do anything special unless the
+    /// '}' character immediately follows '{'. For example,
+    /// </para>
+    /// <code>
+    /// MessageFormatter.Format(&quot;Set {1,2,3} is not equal to {}.&quot;, &quot;1,2&quot;);
+    /// </code>
+    /// <para>
+    /// will return the string "Set {1,2,3} is not equal to 1,2.".
+    /// </para>
+    /// <para>
+    /// If for whatever reason you need to place the string "{}" in the message without its <em>formatting anchor</em>
+    /// meaning, then you need to escape the '{' character with '\', that is the backslash character. Only the '{'
+    /// character should be escaped. There is no need to escape the '}' character. For example,
+    /// </para>
+    /// <code>
+    /// MessageFormatter.Format(&quot;Set \\{} is not equal to {}.&quot;, &quot;1,2&quot;);
+    /// </code>
+    /// <para>
+    /// will return the string "Set {} is not equal to 1,2.".
+    /// </para>
+    /// <para>
+    /// The escaping behavior just described can be overridden by escaping the escape character '\'. Calling
+    /// </para>
+    /// <code>
+    /// MessageFormatter.Format(&quot;File name is C:\\\\{}.&quot;, &quot;file.zip&quot;);
+    /// </code>
+    /// <para>
+    /// will return the string "File name is C:\file.zip".
+    /// </para>
+    /// <seealso cref="Format(string, object)" />
+    /// <seealso cref="Format(string, object, object)" />
+    /// <seealso cref="ArrayFormat(string, object[])" />
     /// </summary>
-    static class MessageFormatter
+    public static class MessageFormatter
     {
         static readonly char DELIM_START = '{';
         static readonly string DELIM_STR = "{}";
         static readonly char ESCAPE_CHAR = '\\';
 
         /// <summary>
-        ///     Performs single argument substitution for the 'messagePattern' passed as
-        ///     parameter.
-        ///     <p />
-        ///     For example,
-        ///     <p />
-        ///     <pre>
-        ///         MessageFormatter.Format(&quot;Hi {}.&quot;, &quot;there&quot;);
-        ///     </pre>
-        ///     <p />
-        ///     will return the string "Hi there.".
-        ///     <p />
+        /// Performs single argument substitution for the given <paramref name="messagePattern"/>.
+        /// <para>
+        /// For example,
+        /// </para>
+        /// <code>
+        /// MessageFormatter.Format(&quot;Hi {}.&quot;, &quot;there&quot;);
+        /// </code>
+        /// <para>
+        /// will return the string "Hi there.".
+        /// </para>
         /// </summary>
         /// <param name="messagePattern">The message pattern which will be parsed and formatted</param>
         /// <param name="arg">The argument to be substituted in place of the formatting anchor</param>
         /// <returns>The formatted message</returns>
-        public static FormattingTuple Format(string messagePattern, object arg)
-        {
-            return ArrayFormat(messagePattern, new[] { arg });
-        }
+        public static FormattingTuple Format(string messagePattern, object arg) => ArrayFormat(messagePattern, new[] { arg });
 
         /// <summary>
-        /// Performs a two argument substitution for the 'messagePattern' passed as
-        /// parameter.
-        /// <p/>
+        /// Performs a two argument substitution for the given <paramref name="messagePattern"/>.
+        /// <para>
         /// For example,
-        /// <p/>
-        /// <pre>
+        /// </para>
+        /// <code>
         /// MessageFormatter.Format(&quot;Hi {}. My name is {}.&quot;, &quot;Alice&quot;, &quot;Bob&quot;);
-        /// </pre>
-        /// <p/>
+        /// </code>
+        /// <para>
         /// will return the string "Hi Alice. My name is Bob.".
+        /// </para>
         /// </summary>
         /// <param name="messagePattern">The message pattern which will be parsed and formatted</param>
         /// <param name="argA">The argument to be substituted in place of the first formatting anchor</param>
         /// <param name="argB">The argument to be substituted in place of the second formatting anchor</param>
         /// <returns>The formatted message</returns>
-        public static FormattingTuple Format(string messagePattern,
-            object argA, object argB)
-        {
-            return ArrayFormat(messagePattern, new object[] { argA, argB });
-        }
+        public static FormattingTuple Format(string messagePattern, object argA, object argB) => ArrayFormat(messagePattern, new[] { argA, argB });
 
         public static Exception GetThrowableCandidate(object[] argArray)
         {
@@ -125,18 +102,12 @@ namespace DotNetty.Common.Internal.Logging
                 return null;
             }
 
-            object lastEntry = argArray[argArray.Length - 1];
-            if (lastEntry is Exception)
-            {
-                return (Exception)lastEntry;
-            }
-            return null;
+            return argArray[argArray.Length - 1] as Exception;
         }
 
         /// <summary>
-        /// Same principle as the {@link #Format(String, Object)} and
-        /// {@link #Format(String, Object, Object)} methods except that any number of
-        /// arguments can be passed in an array.
+        /// Same principle as the <see cref="Format(string,object)"/> and <see cref="Format(string,object,object)"/>
+        /// methods, except that any number of arguments can be passed in an array.
         /// </summary>
         /// <param name="messagePattern">The message pattern which will be parsed and formatted</param>
         /// <param name="argArray">An array of arguments to be substituted in place of formatting anchors</param>
@@ -157,13 +128,12 @@ namespace DotNetty.Common.Internal.Logging
             }
 
             int i = 0;
-            int j;
             var sbuf = new StringBuilder(messagePattern.Length + 50);
 
             int l;
             for (l = 0; l < argArray.Length; l++)
             {
-                j = messagePattern.IndexOf(DELIM_STR, i, StringComparison.Ordinal);
+                int j = messagePattern.IndexOf(DELIM_STR, i, StringComparison.Ordinal);
 
                 if (j == -1)
                 {
@@ -235,11 +205,7 @@ namespace DotNetty.Common.Internal.Logging
             return messagePattern[delimeterStartIndex - 1] == ESCAPE_CHAR;
         }
 
-        public static bool IsDoubleEscaped(string messagePattern,
-            int delimeterStartIndex)
-        {
-            return delimeterStartIndex >= 2 && messagePattern[delimeterStartIndex - 2] == ESCAPE_CHAR;
-        }
+        public static bool IsDoubleEscaped(string messagePattern, int delimeterStartIndex) => delimeterStartIndex >= 2 && messagePattern[delimeterStartIndex - 2] == ESCAPE_CHAR;
 
         // special treatment of array values was suggested by 'lizongbo'
         static void DeeplyAppendParameter(StringBuilder sbuf, object o,

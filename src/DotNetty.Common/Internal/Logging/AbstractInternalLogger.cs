@@ -7,31 +7,26 @@ namespace DotNetty.Common.Internal.Logging
     using System.Diagnostics.Contracts;
 
     /// <summary>
-    ///     A skeletal implementation of {@link IInternalLogger}.  This class implements
-    ///     all methods that have a { @link InternalLogLevel } parameter by default to call
-    ///     specific logger methods such as {@link #Info(String)} or {@link #isInfoEnabled()}.
+    /// A skeletal implementation of <see cref="IInternalLogger"/>. This class implements
+    /// all methods that have a <see cref="InternalLogLevel"/> parameter by default to call
+    /// specific logger methods such as <see cref="Info(string)"/> or <see cref="InfoEnabled"/>.
     /// </summary>
     public abstract class AbstractInternalLogger : IInternalLogger
     {
         static readonly string EXCEPTION_MESSAGE = "Unexpected exception:";
 
-        readonly string name;
-
         /// <summary>
         /// Creates a new instance.
         /// </summary>
-        /// <param name="name"></param>
+        /// <param name="name">A friendly name for the new logger instance.</param>
         protected AbstractInternalLogger(string name)
         {
             Contract.Requires(name != null);
 
-            this.name = name;
+            this.Name = name;
         }
 
-        public string Name
-        {
-            get { return this.name; }
-        }
+        public string Name { get; }
 
         public bool IsEnabled(InternalLogLevel level)
         {
@@ -64,10 +59,7 @@ namespace DotNetty.Common.Internal.Logging
 
         public abstract void Trace(string msg, Exception t);
 
-        public void Trace(Exception t)
-        {
-            this.Trace(EXCEPTION_MESSAGE, t);
-        }
+        public void Trace(Exception t) => this.Trace(EXCEPTION_MESSAGE, t);
 
         public abstract bool DebugEnabled { get; }
 
@@ -81,10 +73,7 @@ namespace DotNetty.Common.Internal.Logging
 
         public abstract void Debug(string msg, Exception t);
 
-        public void Debug(Exception t)
-        {
-            this.Debug(EXCEPTION_MESSAGE, t);
-        }
+        public void Debug(Exception t) => this.Debug(EXCEPTION_MESSAGE, t);
 
         public abstract bool InfoEnabled { get; }
 
@@ -98,10 +87,7 @@ namespace DotNetty.Common.Internal.Logging
 
         public abstract void Info(string msg, Exception t);
 
-        public void Info(Exception t)
-        {
-            this.Info(EXCEPTION_MESSAGE, t);
-        }
+        public void Info(Exception t) => this.Info(EXCEPTION_MESSAGE, t);
 
         public abstract bool WarnEnabled { get; }
 
@@ -115,10 +101,7 @@ namespace DotNetty.Common.Internal.Logging
 
         public abstract void Warn(string msg, Exception t);
 
-        public void Warn(Exception t)
-        {
-            this.Warn(EXCEPTION_MESSAGE, t);
-        }
+        public void Warn(Exception t) => this.Warn(EXCEPTION_MESSAGE, t);
 
         public abstract bool ErrorEnabled { get; }
 
@@ -132,10 +115,7 @@ namespace DotNetty.Common.Internal.Logging
 
         public abstract void Error(string msg, Exception t);
 
-        public void Error(Exception t)
-        {
-            this.Error(EXCEPTION_MESSAGE, t);
-        }
+        public void Error(Exception t) => this.Error(EXCEPTION_MESSAGE, t);
 
         public void Log(InternalLogLevel level, string msg, Exception cause)
         {
@@ -281,9 +261,6 @@ namespace DotNetty.Common.Internal.Logging
             }
         }
 
-        public override string ToString()
-        {
-            return this.GetType().Name + '(' + this.Name + ')'; // todo: port: revert: StringUtil.simpleClassName(this) + '(' + name() + ')';
-        }
+        public override string ToString() => this.GetType().Name + '(' + this.Name + ')';
     }
 }

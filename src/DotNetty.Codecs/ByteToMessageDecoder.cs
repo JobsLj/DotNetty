@@ -15,7 +15,8 @@ namespace DotNetty.Codecs
         public delegate IByteBuffer CumulationFunc(IByteBufferAllocator alloc, IByteBuffer cumulation, IByteBuffer input);
 
         /// <summary>
-        /// Cumulates instances of <see cref="IByteBuffer"/> by merging them into one <see cref="IByteBuffer"/>, using memory copies.
+        ///     Cumulates instances of <see cref="IByteBuffer" /> by merging them into one <see cref="IByteBuffer" />, using memory
+        ///     copies.
         /// </summary>
         public static readonly CumulationFunc MergeCumulator = (allocator, cumulation, input) =>
         {
@@ -42,10 +43,13 @@ namespace DotNetty.Codecs
         };
 
         /// <summary>
-        /// Cumulate instances of <see cref="IByteBuffer"/> by add them to a <see cref="CompositeByteBuffer"/> and therefore avoiding memory copy when possible.
+        ///     Cumulate instances of <see cref="IByteBuffer" /> by add them to a <see cref="CompositeByteBuffer" /> and therefore
+        ///     avoiding memory copy when possible.
         /// </summary>
-        /// <remarks>Be aware that <see cref="CompositeByteBuffer"/> use a more complex indexing implementation so depending on your use-case
-        /// and the decoder implementation this may be slower then just use the <see cref="MergeCumulator"/>.
+        /// <remarks>
+        ///     Be aware that <see cref="CompositeByteBuffer" /> use a more complex indexing implementation so depending on your
+        ///     use-case
+        ///     and the decoder implementation this may be slower then just use the <see cref="MergeCumulator" />.
         /// </remarks>
         public static CumulationFunc CompositionCumulation = (alloc, cumulation, input) =>
         {
@@ -92,13 +96,13 @@ namespace DotNetty.Codecs
             // ReSharper disable once DoNotCallOverridableMethodsInConstructor -- used for safety check only
             if (this.IsSharable)
             {
-                throw new InvalidOperationException(string.Format("Decoders inheriting from {0} cannot be sharable.", typeof(ByteToMessageDecoder).Name));
+                throw new InvalidOperationException($"Decoders inheriting from {typeof(ByteToMessageDecoder).Name} cannot be sharable.");
             }
         }
 
         /// <summary>
-        /// Determines whether only one message should be decoded per <see cref="ChannelRead"/> call.
-        /// Default is <code>false</code> as this has performance impacts.
+        ///     Determines whether only one message should be decoded per <see cref="ChannelRead" /> call.
+        ///     Default is <code>false</code> as this has performance impacts.
         /// </summary>
         /// <remarks>Is particularly useful in support of protocol upgrade scenarios.</remarks>
         public bool SingleDecode { get; set; }
@@ -111,15 +115,12 @@ namespace DotNetty.Codecs
         }
 
         /// <summary>
-        /// Returns the actual number of readable bytes in the internal cumulative
-        /// buffer of this decoder. You usually do not need to rely on this value
-        /// to write a decoder. Use it only when you must use it at your own risk.
-        /// This method is a shortcut to <see cref="IByteBuffer.ReadableBytes"/> of <see cref="InternalBuffer"/>.
+        ///     Returns the actual number of readable bytes in the internal cumulative
+        ///     buffer of this decoder. You usually do not need to rely on this value
+        ///     to write a decoder. Use it only when you must use it at your own risk.
+        ///     This method is a shortcut to <see cref="IByteBuffer.ReadableBytes" /> of <see cref="InternalBuffer" />.
         /// </summary>
-        protected int ActualReadableBytes
-        {
-            get { return this.InternalBuffer.ReadableBytes; }
-        }
+        protected int ActualReadableBytes => this.InternalBuffer.ReadableBytes;
 
         protected IByteBuffer InternalBuffer
         {
@@ -136,7 +137,7 @@ namespace DotNetty.Codecs
             }
         }
 
-        protected abstract void Decode(IChannelHandlerContext context, IByteBuffer input, List<object> output);
+        protected internal abstract void Decode(IChannelHandlerContext context, IByteBuffer input, List<object> output);
 
         static IByteBuffer ExpandCumulation(IByteBufferAllocator allocator, IByteBuffer cumulation, int readable)
         {
@@ -150,6 +151,9 @@ namespace DotNetty.Codecs
         public override void HandlerRemoved(IChannelHandlerContext context)
         {
             IByteBuffer buf = this.InternalBuffer;
+
+            // Directly set this to null so we are sure we not access it in any other method here anymore.
+            this.cumulation = null;
             int readable = buf.ReadableBytes;
             if (readable > 0)
             {
@@ -161,7 +165,7 @@ namespace DotNetty.Codecs
             {
                 buf.Release();
             }
-            this.cumulation = null;
+
             context.FireChannelReadComplete();
             this.HandlerRemovedInternal(context);
         }
@@ -175,7 +179,7 @@ namespace DotNetty.Codecs
             var data = message as IByteBuffer;
             if (data != null)
             {
-                ThreadLocalObjectList output = ThreadLocalObjectList.Take();
+                ThreadLocalObjectList output = ThreadLocalObjectList.NewInstance();
                 try
                 {
                     this.first = this.cumulation == null;
@@ -245,13 +249,13 @@ namespace DotNetty.Codecs
                 // See:
                 // - https://github.com/netty/netty/issues/2327
                 // - https://github.com/netty/netty/issues/1764
-                this.cumulation.DiscardReadBytes(); // todo: use discardSomeReadBytes
+                this.cumulation.DiscardSomeReadBytes();
             }
         }
 
         public override void ChannelInactive(IChannelHandlerContext ctx)
         {
-            ThreadLocalObjectList output = ThreadLocalObjectList.Take();
+            ThreadLocalObjectList output = ThreadLocalObjectList.NewInstance();
             try
             {
                 if (this.cumulation != null)
@@ -303,6 +307,10 @@ namespace DotNetty.Codecs
 
         protected virtual void CallDecode(IChannelHandlerContext context, IByteBuffer input, List<object> output)
         {
+            Contract.Requires(context != null);
+            Contract.Requires(input != null);
+            Contract.Requires(output != null);
+
             try
             {
                 while (input.IsReadable())
@@ -336,7 +344,7 @@ namespace DotNetty.Codecs
 
                     if (oldInputLength == input.ReadableBytes)
                     {
-                        throw new DecoderException(string.Format("{0}.Decode() did not read anything but decoded a message.", this.GetType().Name));
+                        throw new DecoderException($"{this.GetType().Name}.Decode() did not read anything but decoded a message.");
                     }
 
                     if (this.SingleDecode)
@@ -357,7 +365,12 @@ namespace DotNetty.Codecs
 
         protected virtual void DecodeLast(IChannelHandlerContext context, IByteBuffer input, List<object> output)
         {
-            this.Decode(context, input, output);
+            if (input.IsReadable())
+            {
+                // Only call decode() if there is something left in the buffer to decode.
+                // See https://github.com/netty/netty/issues/4386
+                this.Decode(context, input, output);
+            }
         }
     }
 }

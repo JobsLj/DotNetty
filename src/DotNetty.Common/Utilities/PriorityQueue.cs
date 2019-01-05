@@ -7,7 +7,6 @@ namespace DotNetty.Common.Utilities
     using System.Collections;
     using System.Collections.Generic;
     using System.Diagnostics.Contracts;
-    using System.Linq;
 
     public class PriorityQueue<T> : IEnumerable<T>
         where T : class
@@ -31,10 +30,7 @@ namespace DotNetty.Common.Utilities
         {
         }
 
-        public int Count
-        {
-            get { return this.count; }
-        }
+        public int Count => this.count;
 
         public T Dequeue()
         {
@@ -55,10 +51,7 @@ namespace DotNetty.Common.Utilities
             return result;
         }
 
-        public T Peek()
-        {
-            return this.count == 0 ? null : this.items[0];
-        }
+        public T Peek() => this.count == 0 ? null : this.items[0];
 
         public void Enqueue(T item)
         {
@@ -71,6 +64,31 @@ namespace DotNetty.Common.Utilities
             }
             this.count = oldCount + 1;
             this.BubbleUp(oldCount, item);
+        }
+
+        public void Remove(T item)
+        {
+            int index = Array.IndexOf(this.items, item);
+            if (index == -1)
+            {
+                return;
+            }
+
+            this.count--;
+            if (index == this.count)
+            {
+                this.items[index] = default(T);
+            }
+            else
+            {
+                T last = this.items[this.count];
+                this.items[this.count] = default(T);
+                this.TrickleDown(index, last);
+                if (this.items[index] == last)
+                {
+                    this.BubbleUp(index, last);
+                }
+            }
         }
 
         void BubbleUp(int index, T item)
@@ -131,10 +149,7 @@ namespace DotNetty.Common.Utilities
             }
         }
 
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return this.GetEnumerator();
-        }
+        IEnumerator IEnumerable.GetEnumerator() => this.GetEnumerator();
 
         public void Clear()
         {

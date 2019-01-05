@@ -25,9 +25,12 @@ namespace DotNetty.Common.Tests.Concurrency
         public void TaskSchedulerIsPreserved()
         {
             var executor = new SingleThreadEventExecutor("test", TimeSpan.FromSeconds(5));
-            IEnumerable<Task<int>> tasks = Enumerable.Range(1, 1).Select(i =>
+            IEnumerable<Task<int>> tasks = Enumerable.Range(1, 1).Select(async i =>
             {
-                var completion = new TaskCompletionSource<int>();
+                //Clear SynchronizationContext set by xunit
+                SynchronizationContext.SetSynchronizationContext(null);
+
+                var completion = new TaskCompletionSource();
                 executor.Execute(async () =>
                 {
                     try
@@ -35,14 +38,16 @@ namespace DotNetty.Common.Tests.Concurrency
                         Assert.True(executor.InEventLoop);
                         await Task.Delay(1);
                         Assert.True(executor.InEventLoop);
-                        completion.TrySetResult(0); // all is well
+                        completion.TryComplete(); // all is well
                     }
                     catch (Exception ex)
                     {
                         completion.TrySetException(ex);
                     }
                 });
-                return completion.Task;
+                await completion.Task;
+                Assert.False(executor.InEventLoop);
+                return i;
             });
 
             Task.WhenAll(tasks).Wait(TimeSpan.FromSeconds(500));
@@ -85,7 +90,55 @@ namespace DotNetty.Common.Tests.Concurrency
             Assert.True(mre.WaitOne(TimeSpan.FromSeconds(5)));
         }
 
-        public class Container<T>
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task ScheduledTaskFiresOnTime(bool scheduleFromExecutor)
+        {
+            var scheduler = new SingleThreadEventExecutor(null, TimeSpan.FromMinutes(1));
+            var promise = new TaskCompletionSource();
+            Func<Task> scheduleFunc = () => scheduler.ScheduleAsync(() => promise.Complete(), TimeSpan.FromMilliseconds(100));
+            Task task = scheduleFromExecutor ? await scheduler.SubmitAsync(scheduleFunc) : scheduleFunc();
+            await Task.WhenAny(task, Task.Delay(TimeSpan.FromMilliseconds(300)));
+            Assert.True(task.IsCompleted);
+        }
+
+        [Fact]
+        public async Task ScheduledTaskFiresOnTimeWhileBusy()
+        {
+            var scheduler = new SingleThreadEventExecutor(null, TimeSpan.FromMilliseconds(10));
+            var promise = new TaskCompletionSource();
+            Action selfQueueAction = null;
+            selfQueueAction = () =>
+            {
+                if (!promise.Task.IsCompleted)
+                {
+                    scheduler.Execute(selfQueueAction);
+                }
+            };
+
+            scheduler.Execute(selfQueueAction);
+            Task task = scheduler.ScheduleAsync(() => promise.Complete(), TimeSpan.FromMilliseconds(100));
+            await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.True(task.IsCompleted);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(200)]
+        public async Task ShutdownWhileIdle(int delayInMs)
+        {
+            var scheduler = new SingleThreadEventExecutor("test", TimeSpan.FromMilliseconds(10));
+            if (delayInMs > 0)
+            {
+                Thread.Sleep(delayInMs);
+            }
+            Task shutdownTask = scheduler.ShutdownGracefullyAsync(TimeSpan.FromMilliseconds(50), TimeSpan.FromSeconds(1));
+            await Task.WhenAny(shutdownTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.True(shutdownTask.IsCompleted);
+        }
+
+        class Container<T>
         {
             public T Value;
         }
